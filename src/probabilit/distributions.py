@@ -1,6 +1,6 @@
-import scipy as sp
 import numpy as np
 import warnings
+import scipy as sp
 from probabilit.modeling import Distribution
 
 
@@ -27,8 +27,8 @@ def PERT(minimum, mode, maximum, gamma=4.0):
     return Distribution("beta", a=a, b=b, loc=loc, scale=scale)
 
 
-def Triangular(p10, mode, p90):
-    """Find optimal scipy parametrization given (p10, mode, p90) and
+def Triangular(low, mode, high, low_perc=0.1, high_perc=0.9):
+    """Find optimal scipy parametrization given (low, mode, high) and
     return Distribution("triang", loc=..., scale=..., c=...).
 
     This distribution does *not* work with composite distributions.
@@ -36,120 +36,78 @@ def Triangular(p10, mode, p90):
 
     Examples
     --------
-    >>> Triangular(p10=1, mode=5, p90=9)
-    Distribution("triang", loc=-2.236068061140598, scale=14.472136057963969, c=0.5000000024295282)
+    >>> Triangular(low=1, mode=5, high=9)
+    Distribution("triang", loc=-2.2360679774997894, scale=14.472135954999578, c=0.5000000000000001)
+    >>> Triangular(low=1, mode=5, high=9, low_perc=0.25, high_perc=0.75)
+    Distribution("triang", loc=-8.656854249492383, scale=27.313708498984766, c=0.5)
     """
     # A few comments on fitting can be found here:
     # https://docs.analytica.com/index.php/Triangular10_50_90
 
-    if not (p10 < mode < p90):
-        raise ValueError(f"Must have {p10=} < {mode=} < {p90=}")
+    if not (low < mode < high):
+        raise ValueError(f"Must have {low=} < {mode=} < {high=}")
+    if not ((0 < low_perc <= 1.0) and (0 <= high_perc < 1.0)):
+        raise ValueError("Percentiles must be between 0 and 1.")
 
     # Optimize parameters
-    loc, scale, c = _triang_params_from_perc(p10=p10, mode=mode, p90=p90)
+    loc, scale, c = _fit_triangular_distribution(
+        low=low,
+        mode=mode,
+        high=high,
+        low_perc=low_perc,
+        high_perc=high_perc,
+    )
     return Distribution("triang", loc=loc, scale=scale, c=c)
 
 
-def _triang_params_from_perc(p10, mode, p90):
-    """Given (p10, mode, p90), finds (shift, scale, c).
+def _fit_triangular_distribution(low, mode, high, low_perc=0.10, high_perc=0.90):
+    """Returns a tuple (loc, scale, c) to be used with scipy.
 
     Examples
     --------
-    >>> from scipy.stats import triang
-    >>> import math
-    >>> dist = triang(loc=-5, scale=13, c=0.85)
-    >>> loc, scale, c = _triang_params_from_perc(*_triang_extract(dist))
-    >>> math.isclose(loc, -5, rel_tol=0.001)
-    True
-    >>> math.isclose(scale, 13, rel_tol=0.001)
-    True
-    >>> math.isclose(c, 0.85, rel_tol=0.001)
-    True
+    >>> _fit_triangular_distribution(3, 8, 10, low_perc=0.10, high_perc=0.90)
+    (-0.207..., 12.53..., 0.65...)
+    >>> _fit_triangular_distribution(3, 8, 10, low_perc=0.4, high_perc=0.6)
+    (-27.63..., 65.82..., 0.54...)
+    >>> _fit_triangular_distribution(3, 8, 10, low_perc=0, high_perc=1.0)
+    (3.00..., 6.99..., 0.71...)
     """
-    assert p10 < mode < p90
 
-    # Shift and scale inputs before solving optimization problem
-    spread = p90 - p10
-    center = (p90 + p10) / 2
-    p10 = (p10 - center) / spread
-    mode = (mode - center) / spread
-    p90 = (p90 - center) / spread
+    def triangular_cdf(x, a, b, mode):
+        """Calculate CDF of triangular distribution at point x"""
+        if x <= a:
+            return x * 0
+        if x >= b:
+            return x * 0 + 1.0
+        if x <= mode:
+            return ((x - a) ** 2) / ((b - a) * (mode - a))
+        else:
+            return 1 - ((b - x) ** 2) / ((b - a) * (b - mode))
 
-    # Given (p10, mode, p90) we need to find a scipy parametrization
-    # in terms of (loc, scale, c). This cannot be solved analytically.
-    desired = np.array([p10, mode, p90])
+    def equations(params):
+        """System of equations to solve for a and b"""
+        a, b = params
 
-    # Initial guess
-    loc_initial = p10
-    scale_initial = np.log(p90 - p10)
-    c_initial = sp.special.logit((mode - p10) / (p90 - p10))
-    x0 = np.array([loc_initial, scale_initial, c_initial])
+        # Calculate CDFs at the given percentile values
+        cdf_low = triangular_cdf(low, a, b, mode)
+        cdf_high = triangular_cdf(high, a, b, mode)
 
-    # Optimize
-    result = sp.optimize.minimize(
-        _triang_objective, x0=x0, args=(desired,), method="BFGS"
-    )
+        # Return the difference from target percentiles
+        return (cdf_low - low_perc, cdf_high - high_perc)
 
-    assert result.fun < 1e-2
-    # Issues can arise. Determining this beforehand
-    # is hard, so we simply try to optimize and see if we get close.
-    if result.fun > 1e-4:
-        warnings.warn(f"Optimization of triangular params did not converge:\n{result}")
+    # Initial guesses for a and b, the lower and upper bounds for support
+    a0 = low - abs(mode - low)
+    b0 = high + abs(high - mode)
 
-    # Extract parameters
-    loc_opt = result.x[0]
-    scale_opt = np.exp(result.x[1])
-    c_opt = sp.special.expit(result.x[2])
+    # Solve the system of equations
+    a, b = sp.optimize.fsolve(equations, (a0, b0))
+    rmse = np.sqrt(np.sum(np.array(equations([a, b])) ** 2))
+    if rmse > 1e-6:
+        warnings.warn(f"Optimization of Triangular params has {rmse=}")
 
-    # Shift and scale problem back
-    loc_opt = loc_opt * spread + center
-    scale_opt = scale_opt * spread
-
-    return float(loc_opt), float(scale_opt), float(c_opt)
-
-
-def _triang_extract(triangular):
-    """Given a triangular distribution, extract (p10, mode, p90).
-
-    Examples
-    --------
-    >>> from scipy.stats import triang
-    >>> dist = triang(loc=-5, scale=13, c=0.6)
-    >>> p10, mode, p90 = _triang_extract(dist)
-    >>> mode
-    2.8
-    >>> p90
-    5.4
-    """
-    p10, p90 = triangular.ppf([0.1, 0.9])
-    loc = triangular.kwds.get("loc", 0)
-    scale = triangular.kwds.get("scale", 1)
-    c = triangular.kwds.get("c", 0.5)
-    mode = loc + scale * c
-
-    return float(p10), float(mode), float(p90)
-
-
-def _triang_objective(parameters, desired):
-    """Pass parameters (loc, log(scale), logit(c)) into sp.stats.triang
-    and return the RMSE between actual and desired (p10, mode, p90)."""
-
-    loc, scale, c = parameters
-    scale = np.exp(scale)  # Scale must be positive
-    c = np.clip(sp.special.expit(c), 0, 1)  # C must be between 0 and 1
-
-    # Create distribution
-    triangular = sp.stats.triang(loc=loc, scale=scale, c=c)
-
-    # Extract information
-    p10, mode, p90 = _triang_extract(triangular)
-    actual = np.array([p10, mode, p90])
-
-    if not np.isfinite(actual).all():
-        return 1e3
-
-    # RMSE
-    return np.sqrt(np.sum((desired - actual) ** 2)) / scale
+    # Calculate the relative position of the mode, return (loc, scale, c)
+    c = (mode - a) / (b - a)
+    return float(a), float(b - a), float(c)
 
 
 def _pert_to_beta(minimum, mode, maximum, gamma=4.0):
