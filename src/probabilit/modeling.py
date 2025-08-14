@@ -682,6 +682,44 @@ class EmpiricalDistribution(AbstractDistribution):
         return []  # A EmpiricalDistribution does not have any parents
 
 
+class CumulativeDistribution(AbstractDistribution):
+    """A distribution defined by cumulative quantiles.
+
+    Examples
+    --------
+    >>> distr = CumulativeDistribution([0, 0.2, 0.8, 1], [10, 15, 20, 25])
+    >>> distr._sample(np.linspace(0, 1, num=6))
+    array([10.        , 15.        , 16.66666667, 18.33333333, 20.        ,
+           25.        ])
+    >>> distr.sample(9, random_state=42)
+    array([16.45450099, 23.76785766, 19.43328285, 18.32215403, 13.90046601,
+           13.89986301, 11.4520903 , 21.65440364, 18.3426251 ])
+    """
+
+    is_leaf = True
+
+    def __init__(self, quantiles, cumulatives):
+        self.q = np.array(quantiles)
+        self.cumulatives = np.array(cumulatives)
+        if not np.all(np.diff(self.q) > 0):
+            raise ValueError("The quantiles must be strictly increasing.")
+        if not np.all(np.diff(self.cumulatives) > 0):
+            raise ValueError("The cumulatives must be strictly increasing.")
+        if not (np.isclose(np.min(self.q), 0) and np.isclose(np.max(self.q), 1)):
+            raise ValueError("Lowest quantile must be 0 and highest must be 1.")
+        super().__init__()
+
+    def __repr__(self):
+        return f"{type(self).__name__}(quantiles={repr(self.q)}, cumulatives={repr(self.cumulatives)})"
+
+    def _sample(self, q):
+        # Inverse CDF sampling
+        return np.interp(x=q, xp=self.q, fp=self.cumulatives)
+
+    def get_parents(self):
+        return []
+
+
 # ========================================================
 
 
