@@ -4,6 +4,10 @@ import scipy as sp
 from probabilit.modeling import Distribution
 
 
+def Uniform(min=0, max=1):
+    return Distribution("uniform", loc=min, scale=max - min)
+
+
 def Normal(loc, scale):
     return Distribution("norm", loc=loc, scale=scale)
 
