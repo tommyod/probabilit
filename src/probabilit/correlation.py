@@ -730,66 +730,258 @@ def decorrelate(X, remove_variance=True):
     return mean + X
 
 
+def crosscorr(X, x):
+    """For every column in X, compute correlation against x.
+    
+    Examples
+    --------
+    >>> rng = np.random.default_rng(42)
+    >>> X = rng.normal(size=(99, 4))
+    >>> x = rng.normal(size=99)
+    >>> crosscorr(X, x)
+    array([-0.17337212, -0.02369823,  0.02053403, -0.07230385])
+    >>> np.corrcoef(X, x, rowvar=False)[-1, :-1]
+    array([-0.17337212, -0.02369823,  0.02053403, -0.07230385])
+    """
+    X = X - np.mean(X, axis=0)
+    x = x - np.mean(x)
+    numerator = np.mean(X * x[:, None], axis=0)
+    denominator = np.std(X, axis=0) * np.std(x)
+    return numerator / denominator
+    
+
+class CorrelationComputation:
+    """Compute correlation matrix updates in O(m * n) time instead of the naive
+    O(m * n * n) time, where X has shape (m, n).
+    
+    Examples
+    --------
+    >>> rng = np.random.default_rng(42)
+    >>> X = rng.normal(size=(9, 4))
+    >>> computation = CorrelationComputation()
+    >>> computation.compute(X).get().round(2)
+    array([[ 1.  ,  0.41,  0.62,  0.06],
+           [ 0.41,  1.  ,  0.32, -0.6 ],
+           [ 0.62,  0.32,  1.  , -0.15],
+           [ 0.06, -0.6 , -0.15,  1.  ]])
+    >>> col = 0
+    >>> X[2, col], X[3, col] = X[3, col], X[2, col]
+    
+    
+    One swap:
+    >>> computation.compute(X).get().round(3)
+    array([[ 1.   ,  0.372,  0.628,  0.097],
+           [ 0.372,  1.   ,  0.318, -0.6  ],
+           [ 0.628,  0.318,  1.   , -0.151],
+           [ 0.097, -0.6  , -0.151,  1.   ]])
+    >>> computation.newcol(col=0, i=[0], j=[1])
+    array([ 1.        ,  0.24312849,  0.21012142, -0.61623158])
+    >>> X[0, [0]], X[0, [1]] = X[0, [1]], X[0, [0]]
+    >>> computation.compute(X).get().round(3)
+    array([[ 1.   ,  0.322,  0.651, -0.164],
+           [ 0.322,  1.   ,  0.279, -0.349],
+           [ 0.651,  0.279,  1.   , -0.151],
+           [-0.164, -0.349, -0.151,  1.   ]])
+    
+    
+    
+    
+    Two swaps:
+    >>> computation.compute(X).get().round(3)
+    array([[ 1.   ,  0.372,  0.628,  0.097],
+           [ 0.372,  1.   ,  0.318, -0.6  ],
+           [ 0.628,  0.318,  1.   , -0.151],
+           [ 0.097, -0.6  , -0.151,  1.   ]])
+    >>> computation.newcol(col=0, i=[1, 2, 3], j=[0, 1, 2])
+    array([ 1.        ,  0.08158138, -0.25127006, -1.20527898])
+    >>> computation.newcol(col=0, i=[0, 1, 2], j=[1, 2, 3])
+    array([ 1.        ,  0.08158138, -0.25127006, -1.20527898])
+    
+    >>> X[0, [0, 1, 2]], X[0, [1, 2, 3]] = X[0, [1, 2, 3]], X[0, [0, 1, 2]]
+    >>> computation.compute(X).get().round(3)
+    array([[ 1.   ,  0.322,  0.674, -0.137],
+           [ 0.322,  1.   , -0.026, -0.392],
+           [ 0.674, -0.026,  1.   , -0.347],
+           [-0.137, -0.392, -0.347,  1.   ]])
+    
+    
+    
+    
+    >>> computation.compute(X).get().round(2)
+    array([[ 1.  ,  0.37,  0.63,  0.1 ],
+           [ 0.37,  1.  ,  0.32, -0.6 ],
+           [ 0.63,  0.32,  1.  , -0.15],
+           [ 0.1 , -0.6 , -0.15,  1.  ]])
+    >>> computation.newcol(col=col, i=2, j=3)
+    array([1.        , 0.40763112, 0.61801721, 0.06261877])
+    >>> computation.changecol(col=col, i=2, j=3)
+    array([ 0.        ,  0.03571707, -0.01015544, -0.03410109])
+    
+
+    
+    
+    
+    """
+    
+    def __init__(self, correlation_type="pearson"):
+        self.correlation_type = correlation_type
+        corr_types = {"pearson": self._pearson, "spearman": self._spearman}
+        corr_updates = {"pearson": self._update_pearson, "spearman": self._update_spearman}
+        self.correlation_func = corr_types[correlation_type]
+        self.correlation_update_func = corr_updates[correlation_type]
+        
+    def newcol(self, col, i, j):
+        """Returns the new value of columns `col` in the correlation matrix 
+        when rows i and j are swapped."""
+        if isinstance(i, int):
+            i = [i]
+        if isinstance(j, int):
+            j = [j] 
+        
+        row_i = self.X[i, :]
+        row_j = self.X[j, :]
+        # breakpoint()
+        diff = np.sum((row_i - row_j) * (row_j[:, col] - row_i[:, col])[:, None], axis=0)
+        diff[col] = 0
+        return (self.numerator[col, :] + diff / self.m) / (self.denominator * self.denominator[col]) 
+    
+    def changecol(self, col, i, j):
+        """Returns the new value of columns `col` in the correlation matrix 
+        when rows i and j are swapped."""
+        
+        row_i = self.X[i, :]
+        row_j = self.X[j, :]
+        diff = (row_i - row_j) * (row_j[col] - row_i[col])
+        diff[col] = 0
+        return ( diff / self.m) / (self.denominator * self.denominator[col]) 
+    
+        
+        
+    def update(self, x, *, idx):
+        """Update given a new column `x` and its index `idx`."""
+        self.correlation_update_func(x=x, idx=idx)
+        return self
+        
+    def compute(self, X):
+        self.m, self.n = X.shape
+        self.X = np.copy(X)
+        self.corr_mat = self.correlation_func(X)
+        X = X - np.mean(X, axis=0)
+        self.numerator = (X.T @ X) / self.m
+        self.denominator = np.std(X, axis=0)
+        
+        corr = self.numerator / self.denominator[None, :] / self.denominator[:, None]
+        assert np.allclose(self.corr_mat, corr)
+        
+        return self
+    
+    def get(self):
+        return self.corr_mat
+    
+    def _update_pearson(self, x, idx):
+        
+        corrs = crosscorr(self.X, x)
+        corrs[idx] = 1.0
+        
+        self.corr_mat[idx, :] = self.corr_mat[:, idx] =  corrs
+        self.X[:, idx] = x
+        
+    def _update_spearman(self, x, idx):
+        corrs = np.array([(1.0 if idx == i else sp.stats.spearmanr(x, x_i).statistic) for (i, x_i) in enumerate(self.X.T)])
+        
+        self.corr_mat[idx, :] = self.corr_mat[:, idx] =  corrs
+        self.X[:, idx] = x
+        
+        
+    def _pearson(self, X):
+        """Given a matrix X of shape (m, n), return a matrix of shape (n, n)
+        with Pearson correlation coefficients."""
+        return np.corrcoef(X, rowvar=False)
+
+    def _spearman(self, X):
+        """Given a matrix X of shape (m, n), return a matrix of shape (n, n)
+        with Spearman correlation coefficients."""
+        if X.shape[1] == 2:
+            spearman_corr = sp.stats.spearmanr(X).statistic
+            return np.array([[1.0, spearman_corr], [spearman_corr, 1.0]])
+        else:
+            return sp.stats.spearmanr(X).statistic
+        
+        
+
+
 if __name__ == "__main__":
     import pytest
     import matplotlib.pyplot as plt
 
     pytest.main(args=[__file__, "--doctest-modules", "-v", "--capture=sys"])
+    
+    rng = np.random.default_rng(42)
+    X = rng.normal(size=(999, 5))
+    x = rng.normal(size=999)
+    print(np.corrcoef(X, x, rowvar=False).round(2))
+    
+    X = X - np.mean(X, axis=0)
+    x = x - np.mean(x)
+    print(np.mean(X * x[:, None], axis=0) / (np.std(X, axis=0) * np.std(x)))
+    
+    
+    if False:
 
-    rng = np.random.default_rng(2)
-    p = 10
-    n = 999
-
-    sampler = sp.stats.qmc.Halton(d=p, seed=42, scramble=False)
-    samples = sampler.random(n=n)
-    samples = np.vstack(
-        [rng.permutation(np.linspace(0 + 1e-6, 1 - 1e-6, num=n)) for k in range(p)]
-    ).T
-
-    X = np.zeros_like(samples)
-    for j in range(X.shape[1]):
-        func_i = int(rng.integers(0, 4))
-        func = [
-            sp.stats.uniform(),
-            sp.stats.expon(),
-            sp.stats.norm(),
-            sp.stats.lognorm(s=1),
-        ]
-        func = func[func_i]
-        # func = sp.stats.uniform()
-        X[:, j] = func.ppf(samples[:, j]) * rng.normal(loc=5, scale=2)
-
-    plt.figure(figsize=(4, 4))
-    plt.title("Original data set")
-    plt.scatter(X[:, 0], X[:, 1], s=1)
-    plt.show()
-
-    target = np.ones((p, p)) * 0.5
-    np.fill_diagonal(target, 1.0)
-
-    # Create permutation correlator
-    correlator = PermutationCorrelator(verbose=True, tol=1e-4, iterations=10_000)
-    correlator.set_target(target)
-
-    # First try cholesky and
-    X_chol = Cholesky().set_target(target)(X)
-    print(f"Cholesky error: {correlator._error(X_chol):.4f}")
-    plt.figure(figsize=(4, 4))
-    plt.title(f"Cholesky error: {correlator._error(X_chol):.4f}")
-    plt.scatter(X_chol[:, 0], X_chol[:, 1], s=1)
-    plt.show()
-
-    # First try cholesky and
-    X_ic = ImanConover().set_target(target)(X)
-    print(f"ImanConover error: {correlator._error(X_ic):.4f}")
-    plt.figure(figsize=(4, 4))
-    plt.title(f"ImanConover error: {correlator._error(X_ic):.4f}")
-    plt.scatter(X_ic[:, 0], X_ic[:, 1], s=1)
-    plt.show()
-
-    X_pc = correlator(X)
-    print(f"PermutationCorrelator error: {correlator._error(X_pc):.4f}")
-    plt.figure(figsize=(4, 4))
-    plt.title(f"PermutationCorrelator error: {correlator._error(X_pc):.4f}")
-    plt.scatter(X_pc[:, 0], X_pc[:, 1], s=1)
-    plt.show()
+        rng = np.random.default_rng(2)
+        p = 10
+        n = 999
+    
+        sampler = sp.stats.qmc.Halton(d=p, seed=42, scramble=False)
+        samples = sampler.random(n=n)
+        samples = np.vstack(
+            [rng.permutation(np.linspace(0 + 1e-6, 1 - 1e-6, num=n)) for k in range(p)]
+        ).T
+    
+        X = np.zeros_like(samples)
+        for j in range(X.shape[1]):
+            func_i = int(rng.integers(0, 4))
+            func = [
+                sp.stats.uniform(),
+                sp.stats.expon(),
+                sp.stats.norm(),
+                sp.stats.lognorm(s=1),
+            ]
+            func = func[func_i]
+            # func = sp.stats.uniform()
+            X[:, j] = func.ppf(samples[:, j]) * rng.normal(loc=5, scale=2)
+    
+        plt.figure(figsize=(4, 4))
+        plt.title("Original data set")
+        plt.scatter(X[:, 0], X[:, 1], s=1)
+        plt.show()
+    
+        target = np.ones((p, p)) * 0.5
+        np.fill_diagonal(target, 1.0)
+    
+        # Create permutation correlator
+        correlator = PermutationCorrelator(verbose=True, tol=1e-4, iterations=10_000)
+        correlator.set_target(target)
+    
+        # First try cholesky and
+        X_chol = Cholesky().set_target(target)(X)
+        print(f"Cholesky error: {correlator._error(X_chol):.4f}")
+        plt.figure(figsize=(4, 4))
+        plt.title(f"Cholesky error: {correlator._error(X_chol):.4f}")
+        plt.scatter(X_chol[:, 0], X_chol[:, 1], s=1)
+        plt.show()
+    
+        # First try cholesky and
+        X_ic = ImanConover().set_target(target)(X)
+        print(f"ImanConover error: {correlator._error(X_ic):.4f}")
+        plt.figure(figsize=(4, 4))
+        plt.title(f"ImanConover error: {correlator._error(X_ic):.4f}")
+        plt.scatter(X_ic[:, 0], X_ic[:, 1], s=1)
+        plt.show()
+    
+        X_pc = correlator(X)
+        print(f"PermutationCorrelator error: {correlator._error(X_pc):.4f}")
+        plt.figure(figsize=(4, 4))
+        plt.title(f"PermutationCorrelator error: {correlator._error(X_pc):.4f}")
+        plt.scatter(X_pc[:, 0], X_pc[:, 1], s=1)
+        plt.show()
