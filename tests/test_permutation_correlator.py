@@ -51,6 +51,16 @@ class TestCorrelationMatrix:
         observed_corr = corr(X_swp, correlation_type)
         np.testing.assert_allclose(observed_corr, correlation_matrix[:, :], atol=1e-12)
 
+        # Check that committing back and forth leads to the same matrix
+        before = np.copy(correlation_matrix.X)
+        correlation_matrix.commit(col=1, i=[0, 1], j=[2, 3])
+        midway = np.copy(correlation_matrix.X)
+        correlation_matrix.commit(col=1, i=[0, 1], j=[2, 3])
+        after = np.copy(correlation_matrix.X)
+
+        np.testing.assert_allclose(before, after)
+        assert not np.allclose(before, midway)
+
 
 class TestPermutationCorrelator:
     @pytest.mark.parametrize("seed", range(25))

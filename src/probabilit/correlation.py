@@ -730,36 +730,35 @@ def decorrelate(X, remove_variance=True):
     return mean + X
 
 
-def crosscorr(X, x):
-    """For every column in X, compute correlation against x.
-
-    Examples
-    --------
-    >>> rng = np.random.default_rng(42)
-    >>> X = rng.normal(size=(99, 4))
-    >>> x = rng.normal(size=99)
-    >>> crosscorr(X, x)
-    array([-0.17337212, -0.02369823,  0.02053403, -0.07230385])
-    >>> np.corrcoef(X, x, rowvar=False)[-1, :-1]
-    array([-0.17337212, -0.02369823,  0.02053403, -0.07230385])
-    """
-    X = X - np.mean(X, axis=0)
-    x = x - np.mean(x)
-    numerator = np.mean(X * x[:, None], axis=0)
-    denominator = np.std(X, axis=0) * np.std(x)
-    return numerator / denominator
-
-
 class CorrelationMatrix:
-    """Compute correlation matrix updates in O(m * n) time instead of the naive
-    O(m * n * n) time, where X has shape (m, n).
+    """Facilitates fast updates of a correlation matrices when swapping indices
+    in the original data set X.
+
+    The naive approach is to re-compute the entire correlation matrix after a
+    swap, which has cost O(m n^2) if the data has shape (m, n). Some time can
+    be saved if we realize that if we swap indices if in column k, then only
+    the k'th row and column in the correlation matrix changes - this brings
+    the cost down to O(m n).
+
+    The final realization, which we implement here, exploits the fact that
+
+      corr(x, y) = sum (x - E[x]) (y - E[y]) / (std(x) * std(y))
+                 = sum (xy - x E[y] - y E[x] + E[x] E[y] ) / (std(x) * std(y))
+
+    is mostly unchanged when indices are swapped. In fact, every term above
+    except the first term xy is unchanged by swaps. The only thing we need
+    to compute is the change in sum_i x_i * y_i. If `s` indices are swapped,
+    then this can be done in O(s n) time. Since `s` is small this is more or
+    less O(n) time - a vast improvement over the naive O(m n^2) approach.
+    In practice vectorization matters too, but this approach is orders of
+    magnitude faster on large data sets.
 
     Examples
     --------
     >>> rng = np.random.default_rng(42)
     >>> X = rng.normal(size=(9, 4))
     >>> computation = CorrelationMatrix(X)
-    >>> computation.get().round(3)
+    >>> computation[:].round(3)  # Access the array and print it
     array([[ 1.   ,  0.408,  0.618,  0.063],
            [ 0.408,  1.   ,  0.318, -0.6  ],
            [ 0.618,  0.318,  1.   , -0.151],
@@ -770,17 +769,16 @@ class CorrelationMatrix:
     >>> computation.update_column(col=0, i=2, j=3)
     array([1.        , 0.37191405, 0.62817264, 0.09671987])
     >>> X[2, 0], X[3, 0] = X[3, 0], X[2, 0]
-    >>> CorrelationMatrix(X).get().round(3)
-    array([[ 1.   ,  0.372,  0.628,  0.097],
-           [ 0.372,  1.   ,  0.318, -0.6  ],
-           [ 0.628,  0.318,  1.   , -0.151],
-           [ 0.097, -0.6  , -0.151,  1.   ]])
-    >>> X[2, 0], X[3, 0] = X[3, 0], X[2, 0]
 
+    Verify that the column/row is correct:
+
+    >>> np.corrcoef(X, rowvar=False)[:, 0]
+    array([1.        , 0.37191405, 0.62817264, 0.09671987])
+    >>> X[2, 0], X[3, 0] = X[3, 0], X[2, 0]
 
     A series of swaps:
 
-    >>> computation.get().round(3)
+    >>> computation[:].round(3)
     array([[ 1.   ,  0.408,  0.618,  0.063],
            [ 0.408,  1.   ,  0.318, -0.6  ],
            [ 0.618,  0.318,  1.   , -0.151],
@@ -788,7 +786,7 @@ class CorrelationMatrix:
     >>> computation.update_column(col=0, i=[0, 1], j=[2, 3])
     array([ 1.        , -0.64630365,  0.42642021,  0.32491853])
     >>> X[[0, 1], 0], X[[2, 3], 0] = X[[2, 3], 0], X[[0, 1], 0]
-    >>> CorrelationMatrix(X).get().round(3)
+    >>> np.corrcoef(X, rowvar=False).round(3)
     array([[ 1.   , -0.646,  0.426,  0.325],
            [-0.646,  1.   ,  0.318, -0.6  ],
            [ 0.426,  0.318,  1.   , -0.151],
@@ -804,7 +802,7 @@ class CorrelationMatrix:
 
         # Compute correlation matrix
         if correlation_type == "pearson":
-            self.X = np.copy(X)
+            self.X = np.array(X, dtype=float)
         elif correlation_type == "spearman":
             # Spearman(X) = Pearson(rank(X))
             self.X = np.apply_along_axis(sp.stats.rankdata, axis=0, arr=X)
@@ -813,6 +811,7 @@ class CorrelationMatrix:
                 f"`correlation_type` must be in {valid_corrs}, got {correlation_type}"
             )
 
+        # Compute the correlation matrix of the data
         self.m, self.n = X.shape
         X = self.X - np.mean(self.X, axis=0)
         self.numerator = (X.T @ X) / self.m
@@ -831,27 +830,26 @@ class CorrelationMatrix:
     def commit(self, col, i, j):
         """Commit a swap, storing new data and new correlation matrix."""
 
-        # Compute everything we need once
+        # Compute everything we need to update internal state
         delta_numerator = self._delta_numerator(col, i, j)
         delta_column = delta_numerator / (
             self.m * self.denominator * self.denominator[col]
         )
 
-        # Update correlation
+        # Update correlation and the denominator
         self.corr_mat[:, col] += delta_column
         self.corr_mat[col, :] += delta_column
-
-        # Update denominator
         self.numerator[:, col] += delta_numerator
         self.numerator[col, :] += delta_numerator
 
         # Update data
         self.X[i, col], self.X[j, col] = self.X[j, col], self.X[i, col]
-
         return self
 
     def _delta_numerator(self, col, i, j):
         """Compute the delta in the numerator when swapping."""
+        assert isinstance(col, int)
+        assert 0 <= col < self.n
         if isinstance(i, int):
             i = [i]
         if isinstance(j, int):
@@ -885,9 +883,6 @@ class CorrelationMatrix:
 
         delta = self.delta_column(col, i, j)
         return self.corr_mat[:, col] + delta
-
-    def get(self):
-        return self.corr_mat
 
 
 if __name__ == "__main__":
