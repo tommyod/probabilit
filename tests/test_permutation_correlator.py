@@ -5,52 +5,51 @@ import scipy as sp
 
 
 class TestCorrelationMatrix:
-    
-    @pytest.mark.parametrize("seed", range(5))
-    def test_squences_of_swaps(self, seed):
-        
+    @pytest.mark.parametrize("seed", range(10))
+    @pytest.mark.parametrize("correlation_type", ["pearson", "spearman"])
+    def test_squences_of_swaps(self, seed, correlation_type):
+        def corr(X, correlation_type):
+            if correlation_type == "pearson":
+                return np.corrcoef(X, rowvar=False)
+            elif correlation_type == "spearman":
+                return sp.stats.spearmanr(X).statistic
+            else:
+                raise ValueError("Invalid correlation type")
+
         rng = np.random.default_rng(seed)
         X = rng.normal(size=(9, 4))
-        
-        correlation_matrix = CorrelationMatrix(X)
-        
-        # Test that the CorrelationMatrix computes pearson correlation correctly
-        np.testing.assert_allclose(np.corrcoef(X, rowvar=False), correlation_matrix[:, :])
-        
+
+        correlation_matrix = CorrelationMatrix(X, correlation_type=correlation_type)
+
+        # Test that the CorrelationMatrix computes correlation correctly
+        observed_corr = corr(X, correlation_type)
+        np.testing.assert_allclose(observed_corr, correlation_matrix[:, :], atol=1e-12)
+
         # Test two consequtive single swap
         # --------------------------------
         X_swapped = np.copy(X)
         correlation_matrix.commit(col=1, i=0, j=1)
         X_swapped[0, 1], X_swapped[1, 1] = X_swapped[1, 1], X_swapped[0, 1]
-        
-        observed_corr = np.corrcoef(X_swapped, rowvar=False)
-        np.testing.assert_allclose(observed_corr, correlation_matrix[:, :])
-        np.testing.assert_allclose(correlation_matrix.X, X_swapped)
-        
+
+        observed_corr = corr(X_swapped, correlation_type)
+        np.testing.assert_allclose(observed_corr, correlation_matrix[:, :], atol=1e-12)
+
         # Test another swap on the same matrix
         correlation_matrix.commit(col=1, i=2, j=3)
         X_swapped[2, 1], X_swapped[3, 1] = X_swapped[3, 1], X_swapped[2, 1]
-        
-        observed_corr = np.corrcoef(X_swapped, rowvar=False)
-        np.testing.assert_allclose(observed_corr, correlation_matrix[:, :])
-        np.testing.assert_allclose(correlation_matrix.X, X_swapped)
-        
+
+        observed_corr = corr(X_swapped, correlation_type)
+        np.testing.assert_allclose(observed_corr, correlation_matrix[:, :], atol=1e-12)
+
         # Test two swaps on the same matrix at once
         # -----------------------------------------
-        correlation_matrix = CorrelationMatrix(X)
+        correlation_matrix = CorrelationMatrix(X, correlation_type=correlation_type)
         X_swp = np.copy(X)
         correlation_matrix.commit(col=1, i=[0, 1], j=[2, 3])
         X_swp[[0, 1], 1], X_swp[[2, 3], 1] = X_swp[[2, 3], 1], X_swp[[0, 1], 1]
-        
-        observed_corr = np.corrcoef(X_swp, rowvar=False)
-        np.testing.assert_allclose(observed_corr, correlation_matrix[:, :])
-        np.testing.assert_allclose(correlation_matrix.X, X_swp)
-        
-        
-        
-        
-        
-        
+
+        observed_corr = corr(X_swp, correlation_type)
+        np.testing.assert_allclose(observed_corr, correlation_matrix[:, :], atol=1e-12)
 
 
 class TestPermutationCorrelator:
@@ -118,4 +117,6 @@ class TestPermutationCorrelator:
 
 
 if __name__ == "__main__":
-    pytest.main(args=[__file__, "--doctest-modules", "-v", "-l", "-k CorrelationMatrix"])
+    pytest.main(
+        args=[__file__, "--doctest-modules", "-v", "-l", "-k CorrelationMatrix"]
+    )
