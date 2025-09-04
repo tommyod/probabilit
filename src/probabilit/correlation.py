@@ -535,35 +535,20 @@ class PermutationCorrelator(Correlator):
         self.correlation_func = corr_types[correlation_type]
         self.rng = np.random.default_rng(seed)
         self.verbose = verbose
+        self.correlation_type = correlation_type
 
     def set_target(self, correlation_matrix, *, weights=None):
         """Set the target correlation matrix."""
-        super().set_target(correlation_matrix)
-        weights = np.ones_like(self.C) if weights is None else weights
-        self.weights = weights / np.sum(weights)
-        self.triu_indices = np.triu_indices(self.C.shape[0], k=1)
+        # super().set_target(correlation_matrix)
+        self.corr_mat = CorrelationMatrix(
+            X=correlation_matrix, correlation_type=self.correlation_type
+        )
+        weights = (
+            np.ones_like(correlation_matrix, dtype=float)
+            if weights is None
+            else weights
+        )
         return self
-
-    def _pearson(self, X):
-        """Given a matrix X of shape (m, n), return a matrix of shape (n, n)
-        with Pearson correlation coefficients."""
-        # The majority of runtime is spent computing correlation coefficients.
-        # Any attempt to speed up this code should focus on that.
-        # It's possible to compute the difference is the objective function
-        # without explicitly computing the empirical correlation afresh in
-        # every iteration. If X has shape (m, n), then this can take the
-        # runtime from O(m*n*n) to O(n), but it requires Python-loops and
-        # bookkeeping.
-        return np.corrcoef(X, rowvar=False)
-
-    def _spearman(self, X):
-        """Given a matrix X of shape (m, n), return a matrix of shape (n, n)
-        with Spearman correlation coefficients."""
-        if X.shape[1] == 2:
-            spearman_corr = sp.stats.spearmanr(X).statistic
-            return np.array([[1.0, spearman_corr], [spearman_corr, 1.0]])
-        else:
-            return sp.stats.spearmanr(X).statistic
 
     @staticmethod
     def _swap(X, i, j, k):
@@ -640,6 +625,7 @@ class PermutationCorrelator(Correlator):
 
         # Main loop. For each iteration, k cycles through all variables.
         # This parametrizes the algorithm so iterations is less sensitive to k.
+        indices = np.arange(num_obs)
         for iteration, k in loop_gen:
             print_iter = iteration % (self.iters // 10) if self.iters else 1000
             num_swaps = subiters(n=self.iters if self.iters else 10_000, i=iteration)
@@ -647,6 +633,15 @@ class PermutationCorrelator(Correlator):
                 print(
                     f" Iter {iteration:>6}  Error: {current_error:.6f} Swaps: {num_swaps:>2}"
                 )
+
+            # Create two disjoint sets of swaps, e.g. [1, 3] and [4, 8]
+            i, j = list(rng.permutation(indices).reshape(2, -1))
+            i, j = i[:num_swaps], j[:num_swaps]
+
+            # Attempt to swap
+            new_col = self.corr_mat.update_column(col=k, i=i, j=j)
+
+            proposed_error = self._error(current_X)
 
             # Create a sequence of swaps of length `num_swaps`
             swaps = list(self.rng.integers(0, high=num_obs, size=(num_swaps, 2)))
@@ -890,6 +885,28 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
     pytest.main(args=[__file__, "--doctest-modules", "-v", "--capture=sys"])
+
+    if False:
+        import time
+
+        rng = np.random.default_rng(2)
+        n = 999
+
+        for p in [5, 10, 25, 50]:
+            X = rng.normal(size=(n, p))
+
+            target = np.ones((p, p)) * 0.5
+            np.fill_diagonal(target, 1.0)
+
+            correlator = PermutationCorrelator(
+                tol=1e-3, iterations=10_000, verbose=False
+            )
+            correlator.set_target(target)
+
+            st = time.perf_counter()
+            X_trans = correlator(X)
+            elapsed = time.perf_counter() - st
+            print(f"Ran on data of shape {X.shape} in {elapsed:.8f}")
 
     if False:
         rng = np.random.default_rng(2)
