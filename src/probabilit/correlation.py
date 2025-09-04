@@ -485,7 +485,7 @@ class PermutationCorrelator(Correlator):
         >>> variables = 25
         >>> correlation_matrix = np.ones((variables, variables)) * 0.7
         >>> np.fill_diagonal(correlation_matrix, 1.0)
-        >>> perm_trans = PermutationCorrelator(iterations=1000, tol=1e-6,
+        >>> perm_trans = PermutationCorrelator(iterations=250, tol=1e-6,
         ...                                    seed=0, verbose=True)
         >>> perm_trans = perm_trans.set_target(correlation_matrix)
 
@@ -499,19 +499,19 @@ class PermutationCorrelator(Correlator):
         >>> perm_trans._error(X_ic) # Error after Iman-Conover
         0.0071...
         >>> X_ic_pc = perm_trans(X_ic)
-        Running permutation correlator for 1000 iterations.
-         Iter    100  Error: 0.007147 Swaps:  7
-         Iter    200  Error: 0.006822 Swaps:  5
-         Iter    300  Error: 0.005900 Swaps:  3
-         Iter    400  Error: 0.004519 Swaps:  2
-         Iter    500  Error: 0.003540 Swaps:  1
-         Iter    600  Error: 0.002286 Swaps:  1
-         Iter    700  Error: 0.001722 Swaps:  1
-         Iter    800  Error: 0.001325 Swaps:  1
-         Iter    900  Error: 0.001077 Swaps:  1
-         Iter   1000  Error: 0.000951 Swaps:  1
+        Running permutation correlator for 250 iterations.
+         Iter     25  Error: 0.007027 Swaps:  6
+         Iter     50  Error: 0.006988 Swaps:  4
+         Iter     75  Error: 0.006667 Swaps:  3
+         Iter    100  Error: 0.005878 Swaps:  2
+         Iter    125  Error: 0.005330 Swaps:  1
+         Iter    150  Error: 0.004543 Swaps:  1
+         Iter    175  Error: 0.003977 Swaps:  1
+         Iter    200  Error: 0.003528 Swaps:  1
+         Iter    225  Error: 0.003092 Swaps:  1
+         Iter    250  Error: 0.002856 Swaps:  1
         >>> perm_trans._error(X_ic_pc) # Error after Iman-Conover + permutation
-        0.0009511...
+        0.0028...
         """
         corr_types = {"pearson": self._pearson, "spearman": self._spearman}
 
@@ -750,7 +750,7 @@ def crosscorr(X, x):
     return numerator / denominator
     
 
-class CorrelationComputation:
+class CorrelationMatrix:
     """Compute correlation matrix updates in O(m * n) time instead of the naive
     O(m * n * n) time, where X has shape (m, n).
     
@@ -758,155 +758,132 @@ class CorrelationComputation:
     --------
     >>> rng = np.random.default_rng(42)
     >>> X = rng.normal(size=(9, 4))
-    >>> computation = CorrelationComputation()
-    >>> computation.compute(X).get().round(2)
-    array([[ 1.  ,  0.41,  0.62,  0.06],
-           [ 0.41,  1.  ,  0.32, -0.6 ],
-           [ 0.62,  0.32,  1.  , -0.15],
-           [ 0.06, -0.6 , -0.15,  1.  ]])
-    >>> col = 0
-    >>> X[2, col], X[3, col] = X[3, col], X[2, col]
+    >>> computation = CorrelationMatrix(X)
+    >>> computation.get().round(3)
+    array([[ 1.   ,  0.408,  0.618,  0.063],
+           [ 0.408,  1.   ,  0.318, -0.6  ],
+           [ 0.618,  0.318,  1.   , -0.151],
+           [ 0.063, -0.6  , -0.151,  1.   ]])
     
+    A single swap:
     
-    One swap:
-    >>> computation.compute(X).get().round(3)
+    >>> computation.update_column(col=0, i=2, j=3)
+    array([1.        , 0.37191405, 0.62817264, 0.09671987])
+    >>> X[2, 0], X[3, 0] = X[3, 0], X[2, 0]
+    >>> CorrelationMatrix(X).get().round(3)
     array([[ 1.   ,  0.372,  0.628,  0.097],
            [ 0.372,  1.   ,  0.318, -0.6  ],
            [ 0.628,  0.318,  1.   , -0.151],
            [ 0.097, -0.6  , -0.151,  1.   ]])
-    >>> computation.newcol(col=0, i=[0], j=[1])
-    array([ 1.        ,  0.24312849,  0.21012142, -0.61623158])
-    >>> X[0, [0]], X[0, [1]] = X[0, [1]], X[0, [0]]
-    >>> computation.compute(X).get().round(3)
-    array([[ 1.   ,  0.322,  0.651, -0.164],
-           [ 0.322,  1.   ,  0.279, -0.349],
-           [ 0.651,  0.279,  1.   , -0.151],
-           [-0.164, -0.349, -0.151,  1.   ]])
-    
-    
-    
-    
-    Two swaps:
-    >>> computation.compute(X).get().round(3)
-    array([[ 1.   ,  0.372,  0.628,  0.097],
-           [ 0.372,  1.   ,  0.318, -0.6  ],
-           [ 0.628,  0.318,  1.   , -0.151],
-           [ 0.097, -0.6  , -0.151,  1.   ]])
-    >>> computation.newcol(col=0, i=[1, 2, 3], j=[0, 1, 2])
-    array([ 1.        ,  0.08158138, -0.25127006, -1.20527898])
-    >>> computation.newcol(col=0, i=[0, 1, 2], j=[1, 2, 3])
-    array([ 1.        ,  0.08158138, -0.25127006, -1.20527898])
-    
-    >>> X[0, [0, 1, 2]], X[0, [1, 2, 3]] = X[0, [1, 2, 3]], X[0, [0, 1, 2]]
-    >>> computation.compute(X).get().round(3)
-    array([[ 1.   ,  0.322,  0.674, -0.137],
-           [ 0.322,  1.   , -0.026, -0.392],
-           [ 0.674, -0.026,  1.   , -0.347],
-           [-0.137, -0.392, -0.347,  1.   ]])
-    
-    
-    
-    
-    >>> computation.compute(X).get().round(2)
-    array([[ 1.  ,  0.37,  0.63,  0.1 ],
-           [ 0.37,  1.  ,  0.32, -0.6 ],
-           [ 0.63,  0.32,  1.  , -0.15],
-           [ 0.1 , -0.6 , -0.15,  1.  ]])
-    >>> computation.newcol(col=col, i=2, j=3)
-    array([1.        , 0.40763112, 0.61801721, 0.06261877])
-    >>> computation.changecol(col=col, i=2, j=3)
-    array([ 0.        ,  0.03571707, -0.01015544, -0.03410109])
+    >>> X[2, 0], X[3, 0] = X[3, 0], X[2, 0]
     
 
+    A series of swaps:
+        
+    >>> computation.get().round(3)
+    array([[ 1.   ,  0.408,  0.618,  0.063],
+           [ 0.408,  1.   ,  0.318, -0.6  ],
+           [ 0.618,  0.318,  1.   , -0.151],
+           [ 0.063, -0.6  , -0.151,  1.   ]])
+    >>> computation.update_column(col=0, i=[0, 1], j=[2, 3])
+    array([ 1.        , -0.64630365,  0.42642021,  0.32491853])
+    >>> X[[0, 1], 0], X[[2, 3], 0] = X[[2, 3], 0], X[[0, 1], 0]
+    >>> CorrelationMatrix(X).get().round(3)
+    array([[ 1.   , -0.646,  0.426,  0.325],
+           [-0.646,  1.   ,  0.318, -0.6  ],
+           [ 0.426,  0.318,  1.   , -0.151],
+           [ 0.325, -0.6  , -0.151,  1.   ]])
     
+
     
     
     """
     
-    def __init__(self, correlation_type="pearson"):
+    def __init__(self, X, correlation_type="pearson"):
+        valid_corrs = ("pearson", "spearman")
+        assert correlation_type in valid_corrs
+        
+        # Correlation type
         self.correlation_type = correlation_type
-        corr_types = {"pearson": self._pearson, "spearman": self._spearman}
-        corr_updates = {"pearson": self._update_pearson, "spearman": self._update_spearman}
-        self.correlation_func = corr_types[correlation_type]
-        self.correlation_update_func = corr_updates[correlation_type]
         
-    def newcol(self, col, i, j):
-        """Returns the new value of columns `col` in the correlation matrix 
-        when rows i and j are swapped."""
-        if isinstance(i, int):
-            i = [i]
-        if isinstance(j, int):
-            j = [j] 
-        
-        row_i = self.X[i, :]
-        row_j = self.X[j, :]
-        # breakpoint()
-        diff = np.sum((row_i - row_j) * (row_j[:, col] - row_i[:, col])[:, None], axis=0)
-        diff[col] = 0
-        return (self.numerator[col, :] + diff / self.m) / (self.denominator * self.denominator[col]) 
-    
-    def changecol(self, col, i, j):
-        """Returns the new value of columns `col` in the correlation matrix 
-        when rows i and j are swapped."""
-        
-        row_i = self.X[i, :]
-        row_j = self.X[j, :]
-        diff = (row_i - row_j) * (row_j[col] - row_i[col])
-        diff[col] = 0
-        return ( diff / self.m) / (self.denominator * self.denominator[col]) 
-    
-        
-        
-    def update(self, x, *, idx):
-        """Update given a new column `x` and its index `idx`."""
-        self.correlation_update_func(x=x, idx=idx)
-        return self
-        
-    def compute(self, X):
+        # Compute correlation matrix
+        if correlation_type == "pearson":
+            self.X = np.copy(X)
+        elif correlation_type == "spearman":
+            self.X = np.apply_along_axis(sp.stats.rankdata, axis=0, arr=X)
+        else:
+            raise ValueError(f"`correlation_type` must be in {valid_corrs}, got {correlation_type}")
+            
         self.m, self.n = X.shape
-        self.X = np.copy(X)
-        self.corr_mat = self.correlation_func(X)
         X = X - np.mean(X, axis=0)
         self.numerator = (X.T @ X) / self.m
         self.denominator = np.std(X, axis=0)
         
-        corr = self.numerator / self.denominator[None, :] / self.denominator[:, None]
-        assert np.allclose(self.corr_mat, corr)
+        self.corr_mat = self.numerator / self.denominator[None, :] / self.denominator[:, None]
+        
+    def __repr__(self):
+        return repr(self.corr_mat)
+        
+    def __getitem__(self, *args, **kwargs):
+        return self.corr_mat.__getitem__(*args, **kwargs)
+        
+    def commit(self, col, i, j):
+        """Commit a swap, storing new data and new correlation matrix."""
+        
+        # Compute everything we need once
+        delta_numerator = self._delta_numerator(col, i, j)
+        delta_column = delta_numerator / (self.m * self.denominator * self.denominator[col])
+        
+        # Update correlation
+        self.corr_mat[:, col] += delta_column
+        self.corr_mat[col, :] += delta_column
+        
+        # Update denominator
+        self.numerator[:, col] += delta_numerator
+        self.numerator[col, :] += delta_numerator
+        
+        # Update data
+        self.X[i, col], self.X[j, col] = self.X[j, col], self.X[i, col]
         
         return self
-    
+        
+    def _delta_numerator(self, col, i, j):
+        """Compute the delta in the numerator when swapping."""
+        if isinstance(i, int):
+            i = [i]
+        if isinstance(j, int):
+            j = [j] 
+            
+        if set(i).intersection(set(j)):
+            raise ValueError("Swaps must be two disjoint sets, got {i} and {j}")
+        
+        # Vectorized over all swaps
+        row_i = self.X[i, :]
+        row_j = self.X[j, :]
+        entry_ic = row_i[:, col]
+        entry_jc = row_j[:, col]
+        
+        delta_numerator = np.sum((row_i - row_j) * (entry_jc - entry_ic)[:, None], axis=0)
+        delta_numerator[col] = 0
+        return delta_numerator
+        
+        
+    def delta_column(self, col, i, j):
+        """Returns the change in the column `col` in the correlation matrix 
+        when rows i and j are swapped. To save a change, use `.commit()`."""
+        
+        diff = self._delta_numerator(col, i, j)
+        return diff / (self.m * self.denominator * self.denominator[col])
+        
+    def update_column(self, col, i, j):
+        """Returns the new value of column `col` in the correlation matrix 
+        when rows i and j are swapped. To save a change, use `.commit()`."""
+        
+        delta = self.delta_column(col, i, j)
+        return self.corr_mat[:, col] + delta
+
     def get(self):
         return self.corr_mat
-    
-    def _update_pearson(self, x, idx):
-        
-        corrs = crosscorr(self.X, x)
-        corrs[idx] = 1.0
-        
-        self.corr_mat[idx, :] = self.corr_mat[:, idx] =  corrs
-        self.X[:, idx] = x
-        
-    def _update_spearman(self, x, idx):
-        corrs = np.array([(1.0 if idx == i else sp.stats.spearmanr(x, x_i).statistic) for (i, x_i) in enumerate(self.X.T)])
-        
-        self.corr_mat[idx, :] = self.corr_mat[:, idx] =  corrs
-        self.X[:, idx] = x
-        
-        
-    def _pearson(self, X):
-        """Given a matrix X of shape (m, n), return a matrix of shape (n, n)
-        with Pearson correlation coefficients."""
-        return np.corrcoef(X, rowvar=False)
-
-    def _spearman(self, X):
-        """Given a matrix X of shape (m, n), return a matrix of shape (n, n)
-        with Spearman correlation coefficients."""
-        if X.shape[1] == 2:
-            spearman_corr = sp.stats.spearmanr(X).statistic
-            return np.array([[1.0, spearman_corr], [spearman_corr, 1.0]])
-        else:
-            return sp.stats.spearmanr(X).statistic
-        
         
 
 
@@ -916,14 +893,7 @@ if __name__ == "__main__":
 
     pytest.main(args=[__file__, "--doctest-modules", "-v", "--capture=sys"])
     
-    rng = np.random.default_rng(42)
-    X = rng.normal(size=(999, 5))
-    x = rng.normal(size=999)
-    print(np.corrcoef(X, x, rowvar=False).round(2))
     
-    X = X - np.mean(X, axis=0)
-    x = x - np.mean(x)
-    print(np.mean(X * x[:, None], axis=0) / (np.std(X, axis=0) * np.std(x)))
     
     
     if False:
