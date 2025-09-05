@@ -603,7 +603,9 @@ class PermutationCorrelator(Correlator):
         loop_gen = product(iter_gen, range(num_vars))  # (iteration, k)
 
         # Set up variables that are tracked in the main loop
-        corr_mat = CorrelationMatrix(X, correlation_type=self.correlation_type)
+        corr_mat = CorrelationMatrix(
+            X, correlation_type=self.correlation_type, check=False
+        )
         current_error = self._error(observed=corr_mat[:, :], target=self.C)
 
         # Main loop. For each iteration, k cycles through all variables.
@@ -761,12 +763,13 @@ class CorrelationMatrix:
            [ 0.325, -0.6  , -0.151,  1.   ]])
     """
 
-    def __init__(self, X, correlation_type="pearson"):
+    def __init__(self, X, correlation_type="pearson", check=True):
         valid_corrs = ("pearson", "spearman")
         assert correlation_type in valid_corrs
 
         # Correlation type
         self.correlation_type = correlation_type
+        self.check = check
 
         # Compute correlation matrix
         self.X = np.array(X, dtype=float)  # Store original copy
@@ -818,15 +821,17 @@ class CorrelationMatrix:
 
     def _delta_numerator(self, col, i, j):
         """Compute the delta in the numerator when swapping."""
-        assert isinstance(col, int)
-        assert 0 <= col < self.n
-        if isinstance(i, int):
-            i = [i]
-        if isinstance(j, int):
-            j = [j]
+        if self.check:
+            assert isinstance(col, int)
+            assert 0 <= col < self.n
+            if isinstance(i, int):
+                i = [i]
+            if isinstance(j, int):
+                j = [j]
 
-        if set(i).intersection(set(j)):
-            raise ValueError("Swaps must be two disjoint sets, got {i} and {j}")
+            assert len(i) == len(j)
+            if set(i).intersection(set(j)):
+                raise ValueError("Swaps must be two disjoint sets, got {i} and {j}")
 
         # Vectorized over all swaps
         row_i = self.X_[i, :]
@@ -865,16 +870,16 @@ if __name__ == "__main__":
         import time
 
         rng = np.random.default_rng(2)
-        n = 999
+        n = 9999
 
-        for p in [5, 10, 25, 50]:
+        for p in [5, 10, 25, 50, 100, 200]:
             X = rng.normal(size=(n, p))
 
             target = np.ones((p, p)) * 0.5
             np.fill_diagonal(target, 1.0)
 
             correlator = PermutationCorrelator(
-                tol=1e-3, iterations=10_000, verbose=False
+                tol=1e-3, iterations=10**6, verbose=False
             )
             correlator.set_target(target)
 
