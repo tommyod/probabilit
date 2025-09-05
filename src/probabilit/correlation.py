@@ -476,7 +476,7 @@ class PermutationCorrelator(Correlator):
         >>> perm_trans = PermutationCorrelator(seed=0).set_target(correlation_matrix)
         >>> X_transformed = perm_trans(X)
         >>> float(sp.stats.pearsonr(*X_transformed.T).statistic)
-        0.6824...
+        0.6897...
 
         For large matrices, it often makes sense to first use Iman-Conover
         to get a good initial solution, then give it to PermutationCorrelator.
@@ -492,28 +492,28 @@ class PermutationCorrelator(Correlator):
         Create data X, then transform using Iman-Conover:
 
         >>> X = rng.normal(size=(10 * variables, variables))
-        >>> perm_trans._error(X) # Initial error
+        >>> perm_trans._error(correlation_matrix, np.corrcoef(X, rowvar=False))
         0.4846...
         >>> ic_trans = ImanConover().set_target(correlation_matrix)
         >>> X_ic = ic_trans(X)
-        >>> perm_trans._error(X_ic) # Error after Iman-Conover
+        >>> perm_trans._error(correlation_matrix, np.corrcoef(X_ic, rowvar=False)) # Error after Iman-Conover
         0.0071...
         >>> X_ic_pc = perm_trans(X_ic)
         Running permutation correlator for 250 iterations.
-         Iter     25  Error: 0.007027 Swaps:  6
-         Iter     50  Error: 0.006988 Swaps:  4
-         Iter     75  Error: 0.006667 Swaps:  3
-         Iter    100  Error: 0.005878 Swaps:  2
-         Iter    125  Error: 0.005330 Swaps:  1
-         Iter    150  Error: 0.004543 Swaps:  1
-         Iter    175  Error: 0.003977 Swaps:  1
-         Iter    200  Error: 0.003528 Swaps:  1
-         Iter    225  Error: 0.003092 Swaps:  1
-         Iter    250  Error: 0.002856 Swaps:  1
-        >>> perm_trans._error(X_ic_pc) # Error after Iman-Conover + permutation
-        0.0028...
+         Iter     25  Error: 0.007147 Swaps:  6
+         Iter     50  Error: 0.007031 Swaps:  4
+         Iter     75  Error: 0.006704 Swaps:  3
+         Iter    100  Error: 0.005803 Swaps:  2
+         Iter    125  Error: 0.005158 Swaps:  1
+         Iter    150  Error: 0.004272 Swaps:  1
+         Iter    175  Error: 0.003704 Swaps:  1
+         Iter    200  Error: 0.003297 Swaps:  1
+         Iter    225  Error: 0.002991 Swaps:  1
+         Iter    250  Error: 0.002680 Swaps:  1
+        >>> # Error after Iman-Conover + permutation
+        >>> perm_trans._error(correlation_matrix, np.corrcoef(X_ic_pc, rowvar=False))
+        0.0026...
         """
-        corr_types = {"pearson": self._pearson, "spearman": self._spearman}
 
         if not (weights is None or np.all(weights > 0)):
             raise ValueError("`weights` must have positive entries.")
@@ -521,10 +521,6 @@ class PermutationCorrelator(Correlator):
             raise ValueError("`iterations` must be non-negative integer.")
         if not isinstance(tol, float) and tol > 0:
             raise ValueError("`tol` must be a positive float.")
-        if not (isinstance(correlation_type, str) and correlation_type in corr_types):
-            raise ValueError(
-                f"`correlation_type` must be one of: {tuple(corr_types.keys())}"
-            )
         if not (seed is None or isinstance(seed, int)):
             raise TypeError("`seed` must be None or an integer")
         if not isinstance(verbose, bool):
@@ -532,36 +528,24 @@ class PermutationCorrelator(Correlator):
 
         self.iters = iterations
         self.tol = tol
-        self.correlation_func = corr_types[correlation_type]
         self.rng = np.random.default_rng(seed)
         self.verbose = verbose
         self.correlation_type = correlation_type
 
     def set_target(self, correlation_matrix, *, weights=None):
         """Set the target correlation matrix."""
-        # super().set_target(correlation_matrix)
-        self.corr_mat = CorrelationMatrix(
-            X=correlation_matrix, correlation_type=self.correlation_type
-        )
-        weights = (
-            np.ones_like(correlation_matrix, dtype=float)
-            if weights is None
-            else weights
-        )
+        super().set_target(correlation_matrix)
+        weights = np.ones_like(self.C) if weights is None else weights
+        self.weights = weights / np.sum(weights)
+        self.triu_indices = np.triu_indices(self.C.shape[0], k=1)
         return self
 
-    @staticmethod
-    def _swap(X, i, j, k):
-        """Swap rows i and j in column k inplace."""
-        X[i, k], X[j, k] = X[j, k], X[i, k]
-
-    def _error(self, X):
-        """Compute RMSE over upper triangular part of corr(X) - C."""
+    def _error(self, observed, target):
+        """Compute RMSE over upper triangular part of corr(X) - target."""
         # TODO: An optimization is to compute the error only for the swapped
         # variable. If k is swapped, then only row and col for k is changed.
-        corr = self.correlation_func(X)  # Correlation matrix
         idx = self.triu_indices  # Get upper triangular indices (ignore diag)
-        weighted_residuals_sq = self.weights[idx] * (corr[idx] - self.C[idx]) ** 2.0
+        weighted_residuals_sq = self.weights[idx] * (observed[idx] - target[idx]) ** 2.0
         return float(np.sqrt(np.sum(weighted_residuals_sq)))
 
     def __call__(self, X):
@@ -619,9 +603,8 @@ class PermutationCorrelator(Correlator):
         loop_gen = product(iter_gen, range(num_vars))  # (iteration, k)
 
         # Set up variables that are tracked in the main loop
-        current_X = X.copy()
-        current_error = self._error(current_X)
-        iter_no_change = 0
+        corr_mat = CorrelationMatrix(X, correlation_type=self.correlation_type)
+        current_error = self._error(observed=corr_mat[:, :], target=self.C)
 
         # Main loop. For each iteration, k cycles through all variables.
         # This parametrizes the algorithm so iterations is less sensitive to k.
@@ -635,43 +618,33 @@ class PermutationCorrelator(Correlator):
                 )
 
             # Create two disjoint sets of swaps, e.g. [1, 3] and [4, 8]
-            i, j = list(rng.permutation(indices).reshape(2, -1))
+            perm = self.rng.permutation(indices)
+            i, j = list(perm[: 2 * (len(perm) // 2)].reshape(2, -1))
             i, j = i[:num_swaps], j[:num_swaps]
 
             # Attempt to swap
-            new_col = self.corr_mat.update_column(col=k, i=i, j=j)
+            new_corr_col = corr_mat.update_column(col=k, i=i, j=j)
+            old_corr_col = corr_mat[k, :]  # Col or row is arbitrary
+            target_corr_col = self.C[k, :]  # Col or row is arbitrary
+            old_error = target_corr_col - old_corr_col
+            new_error = target_corr_col - new_corr_col
+            # TODO: weights
 
-            proposed_error = self._error(current_X)
+            # Better solution was found, store the change
+            if np.dot(new_error, new_error) < np.dot(old_error, old_error):
+                corr_mat.commit(col=k, i=i, j=j)
 
-            # Create a sequence of swaps of length `num_swaps`
-            swaps = list(self.rng.integers(0, high=num_obs, size=(num_swaps, 2)))
-            for i, j in swaps:
-                # Turn current_X into a new proposed X by swapping two observations
-                # i and j in column (variable) k. The swap is done in-place.
-                self._swap(current_X, i, j, k)
+            # Check convergence on every cycle through columns (k==0)
+            if k == 0:
+                current_error = self._error(corr_mat[:, :], self.C)
+                if current_error < self.tol:
+                    if self.verbose:
+                        print(
+                            f""" Terminating at iteration {iteration} due to tolerance. Error: {current_error:.6f}"""
+                        )
+                    return corr_mat.X
 
-            proposed_error = self._error(current_X)
-
-            # Termination critera
-            if proposed_error < self.tol:
-                if self.verbose:
-                    print(
-                        f""" Terminating at iteration {iteration} due to tolerance. Error: {current_error:.6f}"""
-                    )
-                return current_X
-
-            # The proposed X was better
-            if proposed_error < current_error:
-                current_error = proposed_error
-                iter_no_change = 0
-
-            # The proposed X was worse
-            else:
-                for i, j in reversed(swaps):  # Swap indices back
-                    self._swap(current_X, i, j, k)
-                iter_no_change += 1
-
-        return current_X
+        return corr_mat.X  # The permuted data stored in CorrelationMatrix
 
 
 def decorrelate(X, remove_variance=True):
@@ -796,21 +769,22 @@ class CorrelationMatrix:
         self.correlation_type = correlation_type
 
         # Compute correlation matrix
-        if correlation_type == "pearson":
-            self.X = np.array(X, dtype=float)
-        elif correlation_type == "spearman":
+        self.X = np.array(X, dtype=float)  # Store original copy
+        if self.correlation_type == "pearson":
+            self.X_ = self.X.copy()
+        elif self.correlation_type == "spearman":
             # Spearman(X) = Pearson(rank(X))
-            self.X = np.apply_along_axis(sp.stats.rankdata, axis=0, arr=X)
+            self.X_ = np.apply_along_axis(sp.stats.rankdata, axis=0, arr=self.X)
         else:
             raise ValueError(
                 f"`correlation_type` must be in {valid_corrs}, got {correlation_type}"
             )
 
         # Compute the correlation matrix of the data
-        self.m, self.n = X.shape
-        X = self.X - np.mean(self.X, axis=0)
-        self.numerator = (X.T @ X) / self.m
-        self.denominator = np.std(X, axis=0)
+        self.m, self.n = self.X_.shape
+        X_centered = self.X_ - np.mean(self.X_, axis=0)
+        self.numerator = (X_centered.T @ X_centered) / self.m
+        self.denominator = np.std(X_centered, axis=0)
 
         self.corr_mat = (self.numerator / self.denominator[None, :]) / self.denominator[
             :, None
@@ -838,6 +812,7 @@ class CorrelationMatrix:
         self.numerator[col, :] += delta_numerator
 
         # Update data
+        self.X_[i, col], self.X_[j, col] = self.X_[j, col], self.X_[i, col]
         self.X[i, col], self.X[j, col] = self.X[j, col], self.X[i, col]
         return self
 
@@ -854,8 +829,8 @@ class CorrelationMatrix:
             raise ValueError("Swaps must be two disjoint sets, got {i} and {j}")
 
         # Vectorized over all swaps
-        row_i = self.X[i, :]
-        row_j = self.X[j, :]
+        row_i = self.X_[i, :]
+        row_j = self.X_[j, :]
         entry_ic = row_i[:, col]
         entry_jc = row_j[:, col]
 
@@ -886,7 +861,7 @@ if __name__ == "__main__":
 
     pytest.main(args=[__file__, "--doctest-modules", "-v", "--capture=sys"])
 
-    if False:
+    if True:
         import time
 
         rng = np.random.default_rng(2)
