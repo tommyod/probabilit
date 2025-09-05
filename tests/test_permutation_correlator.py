@@ -12,11 +12,11 @@ class TestSwapIndexGenerator:
     @pytest.mark.parametrize("seed", range(10))
     def test_disjoint(self, seed):
         rng = np.random.default_rng(seed)
-        n = rng.integer(5, 15)
+        n = rng.integers(5, 15)
         generator = SwapIndexGenerator(rng=rng, n=n)
 
         for _ in range(50):
-            size = rng.integer(1, 20)
+            size = rng.integers(1, 20)
             i, j = generator(size)
             assert not set(i).intersection(set(j))
 
@@ -140,10 +140,13 @@ class TestPermutationCorrelator:
         desired_corr = np.identity(10)
         transform = PermutationCorrelator(seed=0).set_target(desired_corr)
         X_trans = transform(X)
-        assert transform._error(X_trans) < transform._error(X)
+
+        cor_X_trans = np.corrcoef(X_trans, rowvar=False)
+        cor_X = np.corrcoef(X, rowvar=False)
+        assert transform._error(cor_X_trans, desired_corr) < transform._error(
+            cor_X, desired_corr
+        )
 
 
 if __name__ == "__main__":
-    pytest.main(
-        args=[__file__, "--doctest-modules", "-v", "-l", "-k CorrelationMatrix"]
-    )
+    pytest.main(args=[__file__, "--doctest-modules", "-v", "-l"])

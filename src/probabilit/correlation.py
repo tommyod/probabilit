@@ -920,29 +920,7 @@ if __name__ == "__main__":
 
     pytest.main(args=[__file__, "--doctest-modules", "-v", "--capture=sys"])
 
-    if False:
-        import time
-
-        rng = np.random.default_rng(2)
-        n = 999
-
-        for p in [5, 10, 25, 50, 100, 200]:
-            X = rng.normal(size=(n, p))
-
-            target = np.ones((p, p)) * 0.5
-            np.fill_diagonal(target, 1.0)
-
-            correlator = PermutationCorrelator(
-                tol=1e-3, iterations=10**4, verbose=False
-            )
-            correlator.set_target(target)
-
-            st = time.perf_counter()
-            X_trans = correlator(X)
-            elapsed = time.perf_counter() - st
-            print(f"Ran on data of shape {X.shape} in {elapsed:.8f}")
-
-    if False:
+    if True:
         rng = np.random.default_rng(2)
         p = 10
         n = 999
@@ -980,23 +958,29 @@ if __name__ == "__main__":
 
         # First try cholesky and
         X_chol = Cholesky().set_target(target)(X)
-        print(f"Cholesky error: {correlator._error(X_chol):.4f}")
+        corr_X_chol = np.corrcoef(X_chol, rowvar=False)
+        error = correlator._error(corr_X_chol, target)
+        print(f"Cholesky error: {error:.4f}")
         plt.figure(figsize=(4, 4))
-        plt.title(f"Cholesky error: {correlator._error(X_chol):.4f}")
+        plt.title(f"Cholesky error: {error:.4f}")
         plt.scatter(X_chol[:, 0], X_chol[:, 1], s=1)
         plt.show()
 
         # First try cholesky and
         X_ic = ImanConover().set_target(target)(X)
-        print(f"ImanConover error: {correlator._error(X_ic):.4f}")
+        corr_X_ic = np.corrcoef(X_ic, rowvar=False)
+        error = correlator._error(corr_X_ic, target)
+        print(f"ImanConover error: {error:.4f}")
         plt.figure(figsize=(4, 4))
-        plt.title(f"ImanConover error: {correlator._error(X_ic):.4f}")
+        plt.title(f"ImanConover error: {error:.4f}")
         plt.scatter(X_ic[:, 0], X_ic[:, 1], s=1)
         plt.show()
 
         X_pc = correlator(X)
-        print(f"PermutationCorrelator error: {correlator._error(X_pc):.4f}")
+        corr_X_pc = np.corrcoef(X_pc, rowvar=False)
+        error = correlator._error(corr_X_pc, target)
+        print(f"PermutationCorrelator error: {error:.4f}")
         plt.figure(figsize=(4, 4))
-        plt.title(f"PermutationCorrelator error: {correlator._error(X_pc):.4f}")
+        plt.title(f"PermutationCorrelator error: {error:.4f}")
         plt.scatter(X_pc[:, 0], X_pc[:, 1], s=1)
         plt.show()
