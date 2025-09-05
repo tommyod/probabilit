@@ -1,7 +1,24 @@
-from probabilit.correlation import PermutationCorrelator, CorrelationMatrix
+from probabilit.correlation import (
+    PermutationCorrelator,
+    CorrelationMatrix,
+    SwapIndexGenerator,
+)
 import numpy as np
 import pytest
 import scipy as sp
+
+
+class TestSwapIndexGenerator:
+    @pytest.mark.parametrize("seed", range(10))
+    def test_disjoint(self, seed):
+        rng = np.random.default_rng(seed)
+        n = rng.integer(5, 15)
+        generator = SwapIndexGenerator(rng=rng, n=n)
+
+        for _ in range(50):
+            size = rng.integer(1, 20)
+            i, j = generator(size)
+            assert not set(i).intersection(set(j))
 
 
 class TestCorrelationMatrix:

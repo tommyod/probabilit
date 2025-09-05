@@ -33,6 +33,7 @@ Induce correlations
 import numpy as np
 import scipy as sp
 import abc
+import dataclasses
 
 import contextlib
 import os
@@ -424,6 +425,51 @@ class ImanConover(Correlator):
         return result
 
 
+@dataclasses.dataclass
+class SwapIndexGenerator:
+    """Returns tuples of disjoint indices (indices1, indices2) of length k,
+    where every index is between 0 and n (exclusive).
+
+    Examples
+    --------
+    >>> rng = np.random.default_rng(42)
+    >>> indices_gen = SwapIndexGenerator(rng=rng, n=9)
+    >>> indices_gen(2)
+    (array([3, 0]), array([7, 2]))
+    >>> indices_gen(2)
+    (array([4, 6]), array([1, 5]))
+    >>> indices_gen(1)
+    (array([6]), array([7]))
+
+    If the size is too large, the largest possible will be returned:
+    >>> indices_gen(10)
+    (array([7, 0, 4, 2]), array([3, 5, 1, 8]))
+    """
+
+    def __init__(self, rng, n: int):
+        assert n >= 2
+        self.rng = rng
+        self.indices = np.arange(n)
+        self.permutation = self.rng.permutation(self.indices)
+
+    def __call__(self, size: int):
+        assert size >= 1
+
+        # Get 2 * size elements
+        size = min(size, len(self.indices) // 2)
+        chosen, self.permutation = (
+            self.permutation[: 2 * size],
+            self.permutation[2 * size :],
+        )
+
+        # Too few - generate a new permutation and try again
+        if len(chosen) < 2 * size:
+            self.permutation = self.rng.permutation(self.indices)
+            return self.__call__(size=size)
+
+        return chosen[:size], chosen[size:]
+
+
 class PermutationCorrelator(Correlator):
     def __init__(
         self,
@@ -476,7 +522,7 @@ class PermutationCorrelator(Correlator):
         >>> perm_trans = PermutationCorrelator(seed=0).set_target(correlation_matrix)
         >>> X_transformed = perm_trans(X)
         >>> float(sp.stats.pearsonr(*X_transformed.T).statistic)
-        0.6807...
+        0.6832...
 
         For large matrices, it often makes sense to first use Iman-Conover
         to get a good initial solution, then give it to PermutationCorrelator.
@@ -501,15 +547,15 @@ class PermutationCorrelator(Correlator):
         >>> X_ic_pc = perm_trans(X_ic)
         Running permutation correlator for 250 iterations.
          Iter     25  Error: 0.007147 Swaps:  6
-         Iter     50  Error: 0.007021 Swaps:  4
-         Iter     75  Error: 0.006261 Swaps:  3
-         Iter    100  Error: 0.005724 Swaps:  2
-         Iter    125  Error: 0.004951 Swaps:  1
-         Iter    150  Error: 0.004271 Swaps:  1
-         Iter    175  Error: 0.003683 Swaps:  1
-         Iter    200  Error: 0.003221 Swaps:  1
-         Iter    225  Error: 0.002888 Swaps:  1
-         Iter    250  Error: 0.002639 Swaps:  1
+         Iter     50  Error: 0.007068 Swaps:  4
+         Iter     75  Error: 0.006949 Swaps:  3
+         Iter    100  Error: 0.006141 Swaps:  2
+         Iter    125  Error: 0.005279 Swaps:  1
+         Iter    150  Error: 0.004611 Swaps:  1
+         Iter    175  Error: 0.004087 Swaps:  1
+         Iter    200  Error: 0.003413 Swaps:  1
+         Iter    225  Error: 0.003078 Swaps:  1
+         Iter    250  Error: 0.002702 Swaps:  1
         >>> # Error after Iman-Conover + permutation
         >>> perm_trans._error(correlation_matrix, np.corrcoef(X_ic_pc, rowvar=False))
         0.0026...
@@ -534,13 +580,13 @@ class PermutationCorrelator(Correlator):
 
     def set_target(self, correlation_matrix, *, weights=None):
         """Set the target correlation matrix.
-        
+
         Parameters
         ----------
         correlation_matrix : np.ndarray
             The target correlation matrix, with shape (variables, variables).
         weights : np.ndarray or None, optional
-            A weight matrix, with shape (variables, variables). 
+            A weight matrix, with shape (variables, variables).
             The default is None, which corresponds to 1 in every entry.
         """
         super().set_target(correlation_matrix)
@@ -554,7 +600,7 @@ class PermutationCorrelator(Correlator):
         idx = self.triu_indices  # Get upper triangular indices (ignore diag)
         weighted_residuals_sq = self.weights[idx] * (observed[idx] - target[idx]) ** 2.0
         return float(np.sqrt(np.sum(weighted_residuals_sq)))
-    
+
     @staticmethod
     def subiters(n, i):
         """Number of sub-iterations (swaps) per iteration."""
@@ -609,6 +655,7 @@ class PermutationCorrelator(Correlator):
         # Set up loop generator
         iter_gen = range(1, self.iters + 1) if self.iters else itertools.count(1)
         loop_gen = product(iter_gen, range(num_vars))  # (iteration, k)
+        swaps_gen = SwapIndexGenerator(rng=self.rng, n=num_obs)
 
         # Set up variables that are tracked in the main loop
         corr_mat = CorrelationMatrix(
@@ -618,26 +665,26 @@ class PermutationCorrelator(Correlator):
 
         # Main loop. For each iteration, k cycles through all variables.
         # This parametrizes the algorithm so iterations is less sensitive to k.
-        idx = np.arange(num_obs)
         for iteration, k in loop_gen:
             print_iter = iteration % (self.iters // 10) if self.iters else 1000
-            num_swaps = self.subiters(n=self.iters if self.iters else 10_000, i=iteration)
+            num_swaps = self.subiters(
+                n=self.iters if self.iters else 10_000, i=iteration
+            )
             if self.verbose and print_iter == 0 and k == 0:
                 print(
                     f" Iter {iteration:>6}  Error: {current_error:.6f} Swaps: {num_swaps:>2}"
                 )
 
             # Create two disjoint sets of swaps, e.g. [1, 3] and [4, 8]
-            chosen_idx = self.rng.choice(idx, size=2 * min(num_swaps, num_obs // 2), replace=False)
-            i, j = chosen_idx.reshape(2, -1)
+            i, j = swaps_gen(num_swaps)
 
             # Attempt to swap
             new_corr_col = corr_mat.update_column(col=k, i=i, j=j)
             old_corr_col = corr_mat[k, :]  # Col or row is arbitrary
             target_corr_col = self.C[k, :]  # Col or row is arbitrary
-            w = self.weights[k,:]
-            old_error = np.average((target_corr_col - old_corr_col)**2, weights=w)
-            new_error = np.average((target_corr_col - new_corr_col)**2, weights=w)
+            w = self.weights[k, :]
+            old_error = np.average((target_corr_col - old_corr_col) ** 2, weights=w)
+            new_error = np.average((target_corr_col - new_corr_col) ** 2, weights=w)
 
             # Better solution was found, store the change
             if new_error < old_error:
@@ -873,7 +920,7 @@ if __name__ == "__main__":
 
     pytest.main(args=[__file__, "--doctest-modules", "-v", "--capture=sys"])
 
-    if True:
+    if False:
         import time
 
         rng = np.random.default_rng(2)
@@ -886,7 +933,7 @@ if __name__ == "__main__":
             np.fill_diagonal(target, 1.0)
 
             correlator = PermutationCorrelator(
-                tol=1e-3, iterations=10**6, verbose=False
+                tol=1e-3, iterations=10**4, verbose=False
             )
             correlator.set_target(target)
 
