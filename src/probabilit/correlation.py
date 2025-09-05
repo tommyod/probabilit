@@ -884,8 +884,7 @@ class CorrelationMatrix:
                 j = [j]
 
             assert len(i) == len(j)
-            if set(i).intersection(set(j)):
-                raise ValueError("Swaps must be two disjoint sets, got {i} and {j}")
+                raise ValueError(f"Swaps must be two disjoint sets, got {i} and {j}")
 
         # Vectorized over all swaps
         row_i = self.X_[i, :]
