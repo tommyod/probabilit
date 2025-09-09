@@ -1087,6 +1087,72 @@ class Sign(UnaryTransform):
     op = np.sign
 
 
+class Sqrt(UnaryTransform):
+    op = np.sqrt
+
+
+class Square(UnaryTransform):
+    op = np.square
+
+
+class Log10(UnaryTransform):
+    op = np.log10
+
+
+# Trigonometric functions
+class Sin(UnaryTransform):
+    op = np.sin
+
+
+class Cos(UnaryTransform):
+    op = np.cos
+
+
+class Tan(UnaryTransform):
+    op = np.tan
+
+
+class Arcsin(UnaryTransform):
+    op = np.arcsin
+
+
+class Arccos(UnaryTransform):
+    op = np.arccos
+
+
+class Arctan(UnaryTransform):
+    op = np.arctan
+
+
+class Arctan2(BinaryTransform):
+    op = np.arctan2
+
+
+# Hyperbolic functions
+class Sinh(UnaryTransform):
+    op = np.sinh
+
+
+class Cosh(UnaryTransform):
+    op = np.cosh
+
+
+class Tanh(UnaryTransform):
+    op = np.tanh
+
+
+class Arcsinh(UnaryTransform):
+    op = np.arcsinh
+
+
+class Arccosh(UnaryTransform):
+    op = np.arccosh
+
+
+class Arctanh(UnaryTransform):
+    op = np.arctanh
+
+
 class ScalarFunctionTransform(Transform):
     """A general-purpose transform using a function that takes scalar arguments
     and returns a scalar result."""
