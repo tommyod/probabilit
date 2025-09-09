@@ -1049,7 +1049,7 @@ class GreaterThanOrEqual(BinaryTransform):
 
 
 class IsClose(BinaryTransform):
-    op = operator.isclose
+    op = np.isclose
 
 
 class UnaryTransform(Transform):
