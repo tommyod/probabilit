@@ -78,6 +78,43 @@ class TestCorrelationMatrix:
         np.testing.assert_allclose(before, after)
         assert not np.allclose(before, midway)
 
+        # Test a single swap
+        a, b = correlation_matrix.X[0, 2], correlation_matrix.X[5, 2]
+        correlation_matrix.commit(col=2, i=0, j=5)
+        np.testing.assert_allclose(a, correlation_matrix.X[5, 2])
+        np.testing.assert_allclose(b, correlation_matrix.X[0, 2])
+
+    @pytest.mark.parametrize("seed", range(100))
+    def test_swap(self, seed):
+        rng = np.random.default_rng(seed)
+        X = rng.normal(size=(9, 4))
+
+        # Test a single swap
+        correlation_matrix = CorrelationMatrix(X)
+        a, b = correlation_matrix.X[0, 2], correlation_matrix.X[5, 2]
+        correlation_matrix.commit(col=2, i=0, j=5)
+        np.testing.assert_allclose(a, correlation_matrix.X[5, 2])
+        np.testing.assert_allclose(b, correlation_matrix.X[0, 2])
+
+    @pytest.mark.parametrize("seed", range(100))
+    @pytest.mark.parametrize("correlation_type", ["pearson", "spearman"])
+    def test_that_many_single_equals_one_large_swap(self, seed, correlation_type):
+        rng = np.random.default_rng(seed)
+        X = rng.normal(size=(9, 4))
+
+        # Test a chain of swaps
+        correlation_matrix = CorrelationMatrix(X, correlation_type=correlation_type)
+        a, b = [1, 3, 2], [6, 4, 5]
+        for i, j in zip(a, b):
+            correlation_matrix.commit(col=2, i=i, j=j)
+        X_singles = np.copy(correlation_matrix.X)
+
+        correlation_matrix = CorrelationMatrix(X, correlation_type=correlation_type)
+        correlation_matrix.commit(col=2, i=a, j=b)
+        X_multiples = np.copy(correlation_matrix.X)
+
+        np.testing.assert_allclose(X_singles, X_multiples)
+
 
 class TestPermutationCorrelator:
     @pytest.mark.parametrize("seed", range(25))
