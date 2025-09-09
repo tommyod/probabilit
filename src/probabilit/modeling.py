@@ -1028,6 +1028,10 @@ class Equal(BinaryTransform):
     op = np.equal
 
 
+class NotEqual(BinaryTransform):
+    op = np.not_equal
+
+
 class LessThan(BinaryTransform):
     op = operator.lt
 
@@ -1042,6 +1046,10 @@ class GreaterThan(BinaryTransform):
 
 class GreaterThanOrEqual(BinaryTransform):
     op = operator.ge
+
+
+class IsClose(BinaryTransform):
+    op = operator.isclose
 
 
 class UnaryTransform(Transform):
