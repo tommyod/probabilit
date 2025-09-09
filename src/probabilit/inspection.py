@@ -7,7 +7,7 @@ Inspection of results, plotting, tables, exporting, etc.
 
 import seaborn
 import pandas as pd
-from probabilit.modeling import NoOp, Distribution
+from probabilit.modeling import NoOp, Distribution, Transform
 import numpy as np
 from numbers import Number
 
@@ -52,6 +52,42 @@ def plot(*variables, corr=None, sample_kwargs=None, **kwargs):
         {f"var_{i}": var.samples_ for (i, var) in enumerate(variables, 1)}
     )
     return seaborn.pairplot(df, **kwargs)
+
+
+def treeprint(node):
+    """Print a computational graph in a tree-like fashion.
+
+    Examples
+    --------
+    >>> scale = Distribution("expon")
+    >>> a = Distribution("norm", loc=1, scale=scale)
+    >>> treeprint(a + scale - scale**2)
+    Subtract
+       ├──Add
+       │  ├──Distribution("norm", loc=1, scale=Distribution("expon"))
+       │  │  └──Distribution("expon")
+       │  └──Distribution("expon")
+       └──Power
+          ├──Distribution("expon")
+          └──Constant(2)
+
+    """
+    elbow, pipe, tee, blank = "└──", "│  ", "├──", "   "
+
+    def _treeprint(node, last=True, header="", root=False):
+        # Recursive version
+        output = type(node).__name__ if isinstance(node, Transform) else str(node)
+        print(header + ("" if root else (elbow if last else tee)) + output)
+
+        if parents := list(node.get_parents()):
+            for i, parent in enumerate(parents):
+                _treeprint(
+                    parent,
+                    header=header + (blank if last else pipe),
+                    last=i == len(parents) - 1,
+                )
+
+    return _treeprint(node, last=True, header="", root=True)
 
 
 if __name__ == "__main__":
