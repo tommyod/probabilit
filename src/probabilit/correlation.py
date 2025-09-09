@@ -845,6 +845,8 @@ class CorrelationMatrix:
         X_centered = self.X_ - np.mean(self.X_, axis=0)
         self.numerator = (X_centered.T @ X_centered) / self.m
         self.denominator = np.std(X_centered, axis=0)
+        if np.any(np.isclose(self.denominator)):
+            raise ValueError("X has one or several constant columns")
 
         self.corr_mat = (self.numerator / self.denominator[None, :]) / self.denominator[
             :, None
