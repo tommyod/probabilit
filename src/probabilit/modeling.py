@@ -597,6 +597,9 @@ class Node(abc.ABC):
                     "Node must be Constant, AbstractDistribution or Transform."
                 )
 
+            if not np.all(np.isfinite(node.samples_)):
+                raise ValueError("Sampling this node gave non-finite values: {node}")
+
             # Tell the garbage collector that we sampled this node.
             # If the reference counter reaches zero (a parent has no unsampled
             # children), then the `.samples_` attribute of the parent might
