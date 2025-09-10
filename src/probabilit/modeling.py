@@ -763,7 +763,7 @@ class Constant(Node, OverloadMixin):
         return np.ones(size, dtype=type(self.value)) * self.value
 
     def get_parents(self):
-        return []  # A Constant does not have any parents
+        yield from []  # A Constant does not have any parents
 
     def __repr__(self):
         return f"{type(self).__name__}({self.value})"
@@ -841,7 +841,7 @@ class EmpiricalDistribution(AbstractDistribution):
         return np.quantile(a=self.data, q=q, **self.kwargs)
 
     def get_parents(self):
-        return []  # A EmpiricalDistribution does not have any parents
+        yield from []  # A EmpiricalDistribution does not have any parents
 
 
 class CumulativeDistribution(AbstractDistribution):
@@ -879,7 +879,7 @@ class CumulativeDistribution(AbstractDistribution):
         return np.interp(x=q, xp=self.q, fp=self.cumulatives)
 
     def get_parents(self):
-        return []
+        yield from []
 
 
 class DiscreteDistribution(AbstractDistribution):
@@ -924,7 +924,7 @@ class DiscreteDistribution(AbstractDistribution):
         return self.values[idx]
 
     def get_parents(self):
-        return []
+        yield from []
 
 
 # ========================================================
