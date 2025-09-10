@@ -820,15 +820,18 @@ class CorrelationMatrix:
     def __init__(self, X, correlation_type="pearson", check=True):
         valid_corrs = ("pearson", "spearman")
         assert correlation_type in valid_corrs
+        assert X.ndim == 2
 
         # Correlation type
         self.correlation_type = correlation_type
         self.check = check
 
-        # Compute correlation matrix
-        self.X = np.array(X, dtype=float)  # Store original copy
+        # Store a copy of the data in the original space
+        self.X = X.copy()
+
+        # Store a copy of the data in the space we're inducing correlations in
         if self.correlation_type == "pearson":
-            self.X_ = self.X.copy()
+            self.X_ = self.X
         elif self.correlation_type == "spearman":
             # Spearman(X) = Pearson(rank(X))
             self.X_ = np.apply_along_axis(sp.stats.rankdata, axis=0, arr=self.X)
@@ -842,6 +845,8 @@ class CorrelationMatrix:
         X_centered = self.X_ - np.mean(self.X_, axis=0)
         self.numerator = (X_centered.T @ X_centered) / self.m
         self.denominator = np.std(X_centered, axis=0)
+        if np.any(np.isclose(self.denominator)):
+            raise ValueError("X has one or several constant columns")
 
         self.corr_mat = (self.numerator / self.denominator[None, :]) / self.denominator[
             :, None
@@ -870,7 +875,8 @@ class CorrelationMatrix:
 
         # Update data
         self.X_[i, col], self.X_[j, col] = self.X_[j, col], self.X_[i, col]
-        self.X[i, col], self.X[j, col] = self.X[j, col], self.X[i, col]
+        if self.correlation_type == "spearman":  # Update original too
+            self.X[i, col], self.X[j, col] = self.X[j, col], self.X[i, col]
         return self
 
     def _delta_numerator(self, col, i, j):
@@ -884,6 +890,8 @@ class CorrelationMatrix:
                 j = [j]
 
             assert len(i) == len(j)
+
+            if set(i).intersection(set(j)):
                 raise ValueError(f"Swaps must be two disjoint sets, got {i} and {j}")
 
         # Vectorized over all swaps
