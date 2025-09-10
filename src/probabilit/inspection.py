@@ -30,22 +30,30 @@ def plot(*variables, corr=None, sample_kwargs=None, **kwargs):
 
     >>> pairgrid = plot(a, sample_kwargs={'size':99})
     """
-    if len(variables) == 2 and isinstance(corr, Number):
-        corr = np.array([[1.0, corr], [corr, 1.0]])
-
-    # Apply defaults first
-    sample_kwargs = {"size": 999, "random_state": 0} | (sample_kwargs or {})
-
     # Create an NoOp node, then copy the NoOp (which copies all parents too)
     # This prevents us from mutating the input arguments
     no_operation = NoOp(*variables).copy()
-    variables = no_operation.parents  # Get reference back to the variables
+    variables = no_operation.parents
 
-    # Correlate if a correlation is given
-    if corr is not None:
-        no_operation.correlate(*variables, corr_mat=corr)
+    if len(variables) == 2 and isinstance(corr, Number):
+        corr = np.array([[1.0, corr], [corr, 1.0]])
 
-    no_operation.sample(**sample_kwargs)
+    # Check if variables are already sampled
+    sampled = [hasattr(v, "samples_") for v in variables]
+
+    if any(sampled) and not all(sampled):
+        raise ValueError("Either all variables must be sampled, or none.")
+
+    # Sample if not sampled, or any  keyword args are specified
+    if not any(sampled) or (corr is not None) or (sample_kwargs is not None):
+        # Apply defaults first
+        sample_kwargs = {"size": 999, "random_state": 0} | (sample_kwargs or {})
+
+        # Correlate if a correlation is given
+        if corr is not None:
+            no_operation.correlate(*variables, corr_mat=corr)
+
+        no_operation.sample(**sample_kwargs)
 
     # Transform to dataframe and return plot
     df = pd.DataFrame(
