@@ -276,7 +276,7 @@ def python_to_prob(argument):
     elif isinstance(argument, Node):
         return argument
     else:
-        raise ValueError("Type not compatible with probabilit: {argument}")
+        raise ValueError(f"Type not compatible with probabilit: {argument}")
 
 
 # =============================================================================
@@ -595,6 +595,14 @@ class Node(abc.ABC):
             else:
                 raise TypeError(
                     "Node must be Constant, AbstractDistribution or Transform."
+                )
+
+            is_numeric = (node.samples_ is not None) and np.issubdtype(
+                node.samples_.dtype, np.number
+            )
+            if is_numeric and not np.all(np.isfinite(node.samples_)):
+                raise ValueError(
+                    f"Sampling this node gave non-finite values: {node}\n{node.samples_}"
                 )
 
             # Tell the garbage collector that we sampled this node.
