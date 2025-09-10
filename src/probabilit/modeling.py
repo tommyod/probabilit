@@ -276,7 +276,7 @@ def python_to_prob(argument):
     elif isinstance(argument, Node):
         return argument
     else:
-        raise ValueError("Type not compatible with probabilit: {argument}")
+        raise ValueError(f"Type not compatible with probabilit: {argument}")
 
 
 # =============================================================================
@@ -595,6 +595,14 @@ class Node(abc.ABC):
             else:
                 raise TypeError(
                     "Node must be Constant, AbstractDistribution or Transform."
+                )
+
+            is_numeric = (node.samples_ is not None) and np.issubdtype(
+                node.samples_.dtype, np.number
+            )
+            if is_numeric and not np.all(np.isfinite(node.samples_)):
+                raise ValueError(
+                    f"Sampling this node gave non-finite values: {node}\n{node.samples_}"
                 )
 
             # Tell the garbage collector that we sampled this node.
@@ -1028,6 +1036,10 @@ class Equal(BinaryTransform):
     op = np.equal
 
 
+class NotEqual(BinaryTransform):
+    op = np.not_equal
+
+
 class LessThan(BinaryTransform):
     op = operator.lt
 
@@ -1042,6 +1054,10 @@ class GreaterThan(BinaryTransform):
 
 class GreaterThanOrEqual(BinaryTransform):
     op = operator.ge
+
+
+class IsClose(BinaryTransform):
+    op = np.isclose
 
 
 class UnaryTransform(Transform):
@@ -1085,6 +1101,72 @@ class Ceil(UnaryTransform):
 
 class Sign(UnaryTransform):
     op = np.sign
+
+
+class Sqrt(UnaryTransform):
+    op = np.sqrt
+
+
+class Square(UnaryTransform):
+    op = np.square
+
+
+class Log10(UnaryTransform):
+    op = np.log10
+
+
+# Trigonometric functions
+class Sin(UnaryTransform):
+    op = np.sin
+
+
+class Cos(UnaryTransform):
+    op = np.cos
+
+
+class Tan(UnaryTransform):
+    op = np.tan
+
+
+class Arcsin(UnaryTransform):
+    op = np.arcsin
+
+
+class Arccos(UnaryTransform):
+    op = np.arccos
+
+
+class Arctan(UnaryTransform):
+    op = np.arctan
+
+
+class Arctan2(BinaryTransform):
+    op = np.arctan2
+
+
+# Hyperbolic functions
+class Sinh(UnaryTransform):
+    op = np.sinh
+
+
+class Cosh(UnaryTransform):
+    op = np.cosh
+
+
+class Tanh(UnaryTransform):
+    op = np.tanh
+
+
+class Arcsinh(UnaryTransform):
+    op = np.arcsinh
+
+
+class Arccosh(UnaryTransform):
+    op = np.arccosh
+
+
+class Arctanh(UnaryTransform):
+    op = np.arctanh
 
 
 class ScalarFunctionTransform(Transform):
